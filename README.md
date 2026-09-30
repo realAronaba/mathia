@@ -1,60 +1,57 @@
 # MathIA
 
-MVP de démonstration d’une plateforme d’apprentissage des mathématiques pour des élèves de 12 à 15 ans. L’interface est en français, sous le nom **MathIA**, avec une palette **bleu intense et cyan électrique**.
+MVP francophone de soutien en mathématiques, organisé comme un **monolithe modulaire** : front-end Next.js PWA, API FastAPI, pipeline pédagogique séquentiel et moteur de calcul déterministe. L’identité visuelle reste bleu intense et cyan électrique.
 
-## Démarrer
+## Démarrage local
 
-Le projet ne demande ni dépendance ni compilation. Les modules JavaScript doivent être servis par HTTP plutôt qu’ouverts directement en `file://`.
-
-Depuis ce dossier, lance un serveur statique :
+Prérequis : Docker Desktop avec Docker Compose. Depuis la racine du dépôt :
 
 ```powershell
-python -m http.server 4173
+docker compose up --build
 ```
 
-Puis ouvre [http://localhost:4173](http://localhost:4173). Si `python` n’est pas dans le PATH, utilise `py -m http.server 4173`.
+Ouvre [http://localhost:3000](http://localhost:3000) pour l’interface MathIA, [http://localhost:3000/atelier](http://localhost:3000/atelier) pour le parcours élève et le suivi parent pilotés par l’API, et [http://localhost:3000/admin](http://localhost:3000/admin) pour la supervision et l’ajout de ressources de programme. La documentation interactive FastAPI est disponible sur [http://localhost:8000/docs](http://localhost:8000/docs).
 
-## Parcours de bout en bout
+Le compose local lance Next.js, FastAPI, PostgreSQL avec pgvector, Redis et un worker Celery. Le parcours de démonstration crée un profil pseudonymisé, enregistre le consentement parent, ouvre une séance élève et fait avancer la progression par la machine à états serveur. L’espace parent consulte la progression et peut retirer son consentement ; l’espace admin consulte les indicateurs agrégés et enregistre des contenus pédagogiques.
 
-1. Depuis l’écran d’accueil, crée un profil avec un pseudonyme, choisis la classe et coche l’accord de démonstration.
-2. Passe les six questions du diagnostic pour remplir la carte de compétences.
-3. Dans **Mes parcours**, consulte les six leçons sur les fractions et ouvre la séance guidée.
-4. Suis les huit étapes de la séance, demande des indices gradués et essaie des réponses équivalentes comme `3/4`, `6/8` ou `0,75`.
-5. Passe en vue parent pour consulter la progression du profil, les séances, les alertes, puis exporter ou mettre le profil en pause.
-6. Passe en vue admin pour faire avancer les leçons **Brouillon → Validé → Publié** et traiter les alertes. La publication rend aussitôt la leçon accessible dans le parcours élève du même navigateur.
+## Parcours et sécurité du tutorat
 
-## Fonctions incluses
+Les rôles API sont `student`, `parent`, `admin` et `super_admin`. Le middleware vérifie les jetons signés et applique une limite de débit Redis. En développement local, `ALLOW_DEMO_AUTH=true` active des jetons de démonstration éphémères ; ce mode doit rester désactivé en production.
 
-- Création locale de plusieurs profils pseudonymisés, avec niveau scolaire, date d’accord, mise en pause et choix d’une limite quotidienne indicative.
-- Diagnostic de six compétences, sans note globale, avec états **Maîtrisé**, **En cours**, **À renforcer** et **Non évalué**.
-- Parcours fractions comprenant six leçons, trois exemples et les erreurs fréquentes de chaque compétence.
-- 90 exercices gradués (15 par compétence), avec réponses et solutions pas à pas produites par des règles déterministes.
-- Séance guidée suivant les huit étapes du cahier des charges et tuteur de démonstration avec indices progressifs.
-- Comparaison exacte des fractions, simplification des réponses et acceptation d’écritures équivalentes.
-- Cahier numérique, tableau de suivi parent, export JSON et suppression des données locales.
-- Signalement permanent dans la séance, alertes soumises à une revue humaine simulée et cycle de validation des contenus.
-- Les trois vues partagent les mêmes données de démonstration afin de parcourir la chaîne parent → élève → parent → admin sans changer d’environnement.
-- Page d’offres sans paiement.
+Chaque réponse suit une séquence imposée :
 
-## Limites connues
+1. Filtre d’entrée et contrôle anti-divulgation de données personnelles.
+2. OCR/Vision uniquement si une photo est soumise et Mathpix est explicitement configuré ; sinon le mode texte reste disponible.
+3. Calcul exact par SymPy sur des expressions fractionnaires limitées.
+4. Recherche de leçon dans pgvector quand des embeddings et une clé de fournisseur sont configurés, avec contenu pédagogique local de secours.
+5. Explication optionnelle via LiteLLM ; le résultat proposé est vérifié contre le moteur exact et remplacé en cas d’écart.
+6. Filtre de sortie. Seul l’orchestrateur déterministe peut valider une réponse ou faire avancer une étape.
 
-Cette version est un prototype front-end autonome pour essayer les parcours et l’interface. Les données sont conservées dans le stockage local du navigateur ; elles ne sont ni chiffrées ni synchronisées. L’accord parental est une étape de démonstration et ne constitue pas un consentement vérifié.
+Les étapes, les tentatives et le niveau d’aide sont persistés dans PostgreSQL. Le score de maîtrise utilise une mise à jour de type Bayesian Knowledge Tracing et une décroissance temporelle. Redis applique une limite par adresse et un quota par élève (80 générations quotidiennes par défaut) pour le fournisseur LLM. Les rapports parent peuvent être générés en tâche de fond par Celery/Redis. Les consentements et actions éditoriales laissent une trace d’audit. Langfuse et Sentry sont désactivés sans clés de projet ; les traces ne contiennent pas les réponses libres des élèves.
 
-Il n’y a pas encore de compte parent, de vérification d’e-mail, d’API, de base de données, de contrôle d’accès serveur, de fournisseur IA, de service de modération, de paiement, de rappel de limite de temps ou de journal serveur. Le tuteur visible utilise des réponses guidées écrites à l’avance ; aucune conversation libre n’est envoyée à un modèle. Les exercices de démonstration sont construits par des règles arithmétiques et doivent encore passer une validation pédagogique humaine avant toute publication réelle.
+## Configuration des fournisseurs
 
-Ne saisis aucune vraie donnée personnelle dans cette démo. Une version de production doit ajouter le back-end sécurisé, l’authentification et les contrôles parentaux avant d’accueillir des élèves.
+Copie `.env.example` vers `.env` pour activer des fournisseurs. Sans secret, le MVP utilise le tuteur déterministe local, désactive l’OCR externe et garde les écrans de paiement et notification en démonstration. Les clés restent côté serveur.
+
+Pour l’authentification gérée, configure l’émetteur de jetons OIDC (`JWT_ISSUER`, `JWT_AUDIENCE`, `JWT_JWKS_URL`) et désactive `ALLOW_DEMO_AUTH`. Le fournisseur d’authentification doit inclure le rôle dans la revendication `role` ou dans `public_metadata.role`.
 
 ## Structure
 
 ```text
-index.html
-src/
-  app.js          interface, vues et interactions
-  catalog.js      compétences, diagnostic, leçons et exercices
-  math.js         calcul exact et comparaison de fractions
-  storage.js      persistance locale de démonstration
-  tutor.js        fournisseur pédagogique local remplaçable
-  styles.css      styles responsive et accessibles
-docs/
-  DECISIONS.md    architecture, traçabilité et suite du backlog
+frontend/                 Next.js App Router, PWA, TypeScript, Tailwind, KaTeX
+frontend/legacy/src/       Interface MVP originale, montée dans Next.js pendant la migration
+backend/app/api/           Routes versionnées pour élève, parent, admin et OCR
+backend/app/core/          Configuration, JWT/RBAC, limitation de débit
+backend/app/db/            Modèles PostgreSQL et persistance SQLAlchemy
+backend/app/domain/        Machine à états, BKT et calcul exact
+backend/app/services/      Pipeline séquentiel, RAG, LLM, OCR et observabilité
+backend/app/workers/       Tâches Celery/Redis de génération des rapports parent
+docker-compose.yml         Services locaux du monolithe
+docs/DECISIONS.md          Architecture cible, limites et feuille de route
 ```
+
+## Périmètre et limites
+
+Le stockage, les contrôles de rôle et les trois parcours API sont implémentés pour la démonstration. L’interface d’administration et le suivi parent utilisent les routes FastAPI ; l’authentification de toutes les interfaces reste en mode démo local. Les identifiants du fournisseur OIDC, les clés LLM, Mathpix, Langfuse et Sentry ne sont pas fournis avec le dépôt. La recette juridique du consentement, la politique de conservation, les notifications, le paiement Wave/Orange Money/carte, la voix, la migration complète de l’ancienne interface et le déploiement haute disponibilité restent des étapes de pilote/production.
+
+N’utilise pas de données réelles de mineurs dans cette configuration locale. La démo conserve une interface locale historique et ne constitue pas un service de production.

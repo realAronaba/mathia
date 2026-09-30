@@ -1,0 +1,95 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: mathia
+      POSTGRES_USER: mathia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mathia-local}
+    ports:
+      - "5432:5432"
+    volumes:
+      - mathia_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mathia -d mathia"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - mathia_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  api:
+    build: ./backend
+    environment: &backend-environment
+      APP_NAME: MathIA API
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      AUTO_CREATE_DB: ${AUTO_CREATE_DB:-true}
+      ALLOW_DEMO_AUTH: ${ALLOW_DEMO_AUTH:-true}
+      JWT_SECRET: ${JWT_SECRET:-local-demo-only-change-before-deploy-7f8d27}
+      JWT_ISSUER: ${JWT_ISSUER:-}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
+      JWT_JWKS_URL: ${JWT_JWKS_URL:-}
+      DATABASE_URL: postgresql+asyncpg://mathia:${POSTGRES_PASSWORD:-mathia-local}@db:5432/mathia
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      LLM_PROVIDER: ${LLM_PROVIDER:-demo}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o-mini}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_REQUESTS_PER_USER_PER_DAY: ${LLM_REQUESTS_PER_USER_PER_DAY:-80}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      MATHPIX_APP_ID: ${MATHPIX_APP_ID:-}
+      MATHPIX_APP_KEY: ${MATHPIX_APP_KEY:-}
+      ENABLE_EXTERNAL_OCR: ${ENABLE_EXTERNAL_OCR:-false}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live')"]
+      interval: 10s
+      timeout: 4s
+      retries: 15
+
+  worker:
+    build: ./backend
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO"]
+    environment: *backend-environment
+    depends_on:
+      api:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  mathia_pgdata:
+  mathia_redisdata:

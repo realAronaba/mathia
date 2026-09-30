@@ -1,0 +1,1 @@
+"""MathIA modular monolith API."""

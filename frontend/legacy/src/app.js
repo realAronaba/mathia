@@ -105,6 +105,37 @@ function percentage(data = studentData()) {
   return Math.round((masteredCount(data) / SKILLS.length) * 100);
 }
 
+const DIAGNOSTIC_RECOMMENDATIONS = {
+  recognize: "Revoir le rôle du numérateur et du dénominateur avec des dessins de parts égales.",
+  compare: "Comparer des fractions avec une même taille de tout ou avec les produits croisés.",
+  simplify: "S’entraîner à trouver un diviseur commun, puis diviser le haut et le bas par le même nombre.",
+  equivalent: "Construire des fractions équivalentes en multipliant le numérateur et le dénominateur par le même facteur.",
+  "add-like": "Reprendre l’addition de fractions de même dénominateur : additionner les numérateurs et garder le dénominateur.",
+  "add-unlike": "Commencer par chercher un dénominateur commun, puis transformer les deux fractions avant d’additionner."
+};
+
+function diagnosticAnalysis(data = studentData()) {
+  const answers = data.diagnostic?.answers || {};
+  const items = DIAGNOSTIC.map((item, index) => ({
+    ...item,
+    skill: SKILL_BY_ID[item.skillId],
+    response: answers[index]
+  }));
+  const correct = items.filter((item) => item.response?.correct);
+  const focus = items.filter((item) => !item.response?.correct);
+  const score = correct.length;
+  const ratio = DIAGNOSTIC.length ? score / DIAGNOSTIC.length : 0;
+  const level = ratio >= 0.84 ? "Très solide" : ratio >= 0.67 ? "En bonne voie" : ratio >= 0.34 ? "À consolider" : "Départ accompagné";
+  const message = ratio >= 0.84
+    ? "Tu peux maintenant passer à des exercices plus variés et relever de nouveaux défis."
+    : ratio >= 0.67
+      ? "Tu as de bonnes bases. Quelques entraînements ciblés t’aideront à gagner en assurance."
+      : ratio >= 0.34
+        ? "Tu as déjà quelques repères. Les prochaines activités vont consolider les notions essentielles."
+        : "On va reprendre les bases pas à pas, avec des exemples guidés et sans pression.";
+  return { items, correct, focus, score, percentage: Math.round(ratio * 100), level, message };
+}
+
 function statusClass(status) {
   if (status === "Maîtrisé") return "status-green";
   if (status === "À renforcer") return "status-blue";
@@ -224,8 +255,16 @@ function renderDiagnostic() {
   if (activeProfile().status === "paused") return renderDashboard();
   if (diagnostic.complete) {
     const skills = progressEntries(data);
+    const report = diagnosticAnalysis(data);
+    const focusMarkup = report.focus.length
+      ? report.focus.map(({ skill }) => `<article class="recommendation-item"><span class="recommendation-icon">↗</span><div><b>${esc(skill.title)}</b><p>${esc(DIAGNOSTIC_RECOMMENDATIONS[skill.id] || skill.short)}</p><button class="text-button" data-skill="${skill.id}">Voir la leçon <span>→</span></button></div></article>`).join("")
+      : `<div class="recommendation-empty"><span>✓</span><div><b>Aucune fragilité détectée pour le moment</b><p>Continue avec un exercice de défi pour entretenir tes acquis.</p></div></div>`;
+    const strengthsMarkup = report.correct.length
+      ? report.correct.map(({ skill }) => `<span class="strength-chip"><span>✓</span>${esc(skill.title)}</span>`).join("")
+      : `<span class="muted-inline">Chaque notion sera reprise avec toi.</span>`;
     return `<div class="page-heading"><div><span class="eyebrow">TON POINT DE DÉPART</span><h1>Ta carte de compétences</h1><p>Ce bilan est un repère pour choisir la prochaine activité, pas une note.</p></div><span class="page-icon icon-blue">◉</span></div>
       <div class="diagnostic-summary"><div class="summary-mark">✳</div><div><b>Bien joué d’avoir essayé, ${esc(activeProfile().pseudonym)}.</b><p>On sait maintenant sur quoi s’appuyer et quoi retravailler ensemble.</p></div><span class="summary-count">${masteredCount(data)} / ${SKILLS.length}<small>à l’aise pour l’instant</small></span></div>
+      <section class="diagnostic-result" aria-labelledby="diagnostic-result-title"><div class="diagnostic-result-heading"><div><span class="eyebrow">TON BILAN PERSONNALISÉ</span><h2 id="diagnostic-result-title">Niveau : ${esc(report.level)}</h2><p>${esc(report.message)}</p></div><div class="diagnostic-score"><strong>${report.score}<span>/${DIAGNOSTIC.length}</span></strong><small>${report.percentage}% de réussite</small></div></div><div class="diagnostic-score-track" aria-label="${report.percentage}% de réussite"><span style="width:${report.percentage}%"></span></div><div class="diagnostic-result-grid"><section><span class="eyebrow">TES POINTS FORTS</span><div class="strength-list">${strengthsMarkup}</div></section><section><span class="eyebrow">À RENFORCER EN PRIORITÉ</span><div class="recommendation-list">${focusMarkup}</div></section></div><p class="diagnostic-date">Bilan réalisé ${diagnostic.completedAt ? esc(dateLabel(diagnostic.completedAt)) : "aujourd’hui"}. Le niveau évoluera avec tes prochaines réponses.</p></section>
       <div class="content-columns"><section class="panel"><div class="panel-heading"><div><span class="eyebrow">TES COMPÉTENCES</span><h2>Une photo de maintenant</h2></div><span class="tiny-status">Mise à jour aujourd’hui</span></div><div class="skill-list skill-list-bordered">${skills.map(({skill}) => renderSkillRow(skill,data)).join("")}</div></section><aside class="panel advice-panel"><span class="advice-icon">✦</span><span class="eyebrow">PROCHAINE ÉTAPE</span><h3>${data.progress["add-unlike"]?.status === "Maîtrisé" ? "Explorer une autre compétence" : "Additionner des fractions"}</h3><p>On va chercher des parts de même taille, puis additionner les numérateurs, étape par étape.</p>${isSkillPublished("add-like")&&isSkillPublished("add-unlike")?`<button class="button button-primary button-wide" data-action="start-session">${data.course.active ? "Reprendre la séance" : "Commencer la séance"}<span>→</span></button>`:`<p class="locked-copy">La séance s’ouvrira quand l’équipe aura publié les deux leçons.</p><button class="outline-button button-wide" data-view="path">Voir le parcours <span>→</span></button>`}</aside></div>`;
   }
   if (!diagnostic.started) return `<div class="page-heading"><div><span class="eyebrow">ON COMMENCE EN DOUCEUR</span><h1>Un petit point de départ</h1><p>Quelques questions nous aideront à choisir les bonnes activités pour toi.</p></div><span class="page-icon icon-green">◉</span></div>
@@ -415,7 +454,7 @@ function checkDiagnostic() {
 }
 
 function completeDiagnostic() {
-  const data = studentData(); data.diagnostic.complete = true; data.diagnostic.started = true; data.diagnostic.checked = false;
+  const data = studentData(); data.diagnostic.complete = true; data.diagnostic.started = true; data.diagnostic.checked = false; data.diagnostic.completedAt ||= new Date().toISOString();
   state.view = "diagnostic"; persist(); render();
 }
 
@@ -515,7 +554,7 @@ function handleClick(event) {
   if (action === "next-diagnostic") {
     const diagnostic=studentData().diagnostic;
     if (diagnostic.step < DIAGNOSTIC.length - 1) { diagnostic.step++; diagnostic.checked=false; persist(); render(); }
-    else { diagnostic.complete=true; diagnostic.checked=false; state.view="diagnostic"; persist(); render(); }
+    else { diagnostic.complete=true; diagnostic.completedAt ||= new Date().toISOString(); diagnostic.checked=false; state.view="diagnostic"; persist(); render(); }
     return;
   }
   if (action === "start-session") { startSession(); return; }
